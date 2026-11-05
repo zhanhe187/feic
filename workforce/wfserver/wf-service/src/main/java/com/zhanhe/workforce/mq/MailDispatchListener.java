@@ -14,7 +14,6 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 
-import java.util.Date;
 
 /**
  * 提醒邮件的消费端。
@@ -75,7 +74,7 @@ public class MailDispatchListener {
             log.info("提醒邮件已发送：msgId={} to={}", message.getMsgId(), employee.getEmail());
         } catch (Exception e) {
             log.warn("提醒邮件发送失败，交给补偿任务重投：msgId={} cause={}", message.getMsgId(), e.toString());
-            mailSendLogService.updateCount(message.getMsgId(), new Date());
+            // 只把状态放回待发送，重试次数由 MailSendTask 统一累加，避免一次失败被记两次
             mailSendLogService.updateMailSendLogStatus(message.getMsgId(), MailConstants.STATUS_PENDING);
         }
     }
