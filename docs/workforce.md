@@ -80,7 +80,7 @@ CREATE INDEX idx_employee_lifecycle_status    ON employee (lifecycleReminderStat
 
 `sendLifecycleMail`：生成 `msgId` → 插 `mail_send_log`（status=0）→ `convertAndSend` 投 `MailTaskMessage(msgId, empId)`，`CorrelationData` 带 `msgId`。消息体只带这两个字段，消费端据此取员工并精确回写对应那条日志，不按员工模糊匹配。`RabbitConfig` 声明 `DirectExchange zhanhe.mail.exchange`、持久化队列 `zhanhe.mail.queue`、routing key `zhanhe.mail.routing.key`，confirm 回调 ack 时把日志置 1（nack 只打日志，不置失败状态）。
 
-消费端是 `mq/MailDispatchListener`，`@RabbitListener(queues = MailConstants.MAIL_QUEUE_NAME)` 收到消息后：按 `empId` 取员工 → 用 `JavaMailSender`（`@Autowired(required=false)`，发件人取 `workforce.mail.from`）发一封 `SimpleMailMessage` → 成功置 1；员工不存在直接置 2；发送抛异常时 `count+1` 并把日志置回 0，交给 `MailSendTask` 重投；容器里没有 `JavaMailSender`（未配置 SMTP）时不假装发送成功，也不进重试队列，只打一条 info 并把日志置 1，避免每 10 秒刷一次失败。
+消费端是 `mq/MailDispatchListener`，`@RabbitListener(queues = MailConstants.MAIL_QUEUE_NAME)` 收到消息后：按 `empId` 取员工 → 用 `JavaMailSender`（`@Autowired(required=false)`，发件人取 `workforce.mail.from`）发一封 `SimpleMailMessage` → 成功置 1；员工不存在直接置 2；发送抛异常时 `count+1` 并把日志置回 0，交给 `MailSendTask` 重投；容器里没有 `JavaMailSender`（未配置 SMTP）时不假装发送成功，也不进重试队列，只打一条 info 并把日志置 1，避免每 10 秒刷一次失败（空 host 仍可能创建 Bean 的情况见 §5 第 9 条）。
 
 完整链路：落日志 → 投递 DTO → confirm 置 1 → 消费端发 SMTP → 失败 `count+1` 置回 0 → `MailSendTask` 每 10 秒重投 → 计数到 3 置 2。发信依赖 `spring-boot-starter-mail`，SMTP 参数在 `application.yml` 的 `spring.mail.*`（host/port/username/password 全部走环境变量，默认为空），发件人由 `workforce.mail.from` 决定。
 
@@ -178,7 +178,7 @@ UPDATE employee SET endContract=DATE_ADD(CURDATE(), INTERVAL 6 DAY),
 
 **验证冷静期**：对某个合同快到期员工调 `PUT /employee/basic/{id}/not-renew`（reason 必填），该员工应从合同待办里消失；把 `employee_lifecycle_action.create_time` 改到 31 天前，会重新出现。
 
-**验证投递与重试**：不配 SMTP 时触发扫描，`mail_send_log` 的新记录先写 0，消费端发现没有 `JavaMailSender` 后置 1（日志里是「未配置 SMTP，跳过实际发信」），不会进重试队列。配好 `MAIL_HOST`/`MAIL_USER`/`MAIL_PASSWORD`（必要时 `MAIL_PORT`/`MAIL_AUTH`/`MAIL_STARTTLS`）即可真实发信，发送失败时 `count` 递增并保持 0、到 3 后置 2。也可以直接造一条：`update mail_send_log set status=0, count=null, tryTime=now() - interval 1 minute where msgId='...';`，观察 10 秒一轮的补偿，顺带复现「count 为 null」的空指针修复路径。broker 停掉后再触发扫描，`convertAndSend` 的异常会让扫描接口报错（见 §5 第 12 条）。
+**验证投递与重试**：不配 SMTP 时触发扫描，`mail_send_log` 的新记录先写 0；如果容器里确实没有 `JavaMailSender`，消费端会置 1 并打一条「未配置 SMTP，跳过实际发信」，不进重试队列（空 host 仍可能创建 Bean 的情况见 §5 第 9 条）。配好 `MAIL_HOST`/`MAIL_USER`/`MAIL_PASSWORD`（必要时 `MAIL_PORT`/`MAIL_AUTH`/`MAIL_STARTTLS`）即可真实发信，发送失败时 `count` 递增并保持 0、到 3 后置 2。也可以直接造一条：`update mail_send_log set status=0, count=null, tryTime=now() - interval 1 minute where msgId='...';`，观察 10 秒一轮的补偿，顺带复现「count 为 null」的空指针修复路径。broker 停掉后再触发扫描，`convertAndSend` 的异常会让扫描接口报错（见 §5 第 12 条）。
 
 **验证事务**：用超过 255 字符的 `reason` 调续签，严格模式下动作 INSERT 报错，`employee` 的合同字段应保持不变，说明 `@Transactional` 回滚生效。
 

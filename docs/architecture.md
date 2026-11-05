@@ -34,7 +34,7 @@ flowchart TB
   S -. 可选 .-> L
 ```
 
-- `workforce` 用 Flyway 管理表结构，启动时按版本执行；`servicedesk` 用手工脚本建库，Quartz 自带 `qrtz_*` 表。
+- `workforce` 用 Flyway 管理表结构，启动时按版本执行；`servicedesk` 用脚本建库，Quartz 默认走内存 JobStore，启动时从 `sys_job` 重建任务，`qrtz_*` 表只在切到 JDBC 持久化时才需要。
 - 模型服务是可选依赖：没有 Key 时 `servicedesk` 直接使用规则引擎，功能不缺失。
 
 ## 2. servicedesk 请求链路
