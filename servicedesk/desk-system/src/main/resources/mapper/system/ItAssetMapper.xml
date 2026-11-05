@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zhanhe.servicedesk.system.mapper.ItAssetMapper">
+
+    <resultMap type="ItAsset" id="ItAssetResult">
+        <id property="assetId" column="asset_id"/>
+        <result property="assetNo" column="asset_no"/>
+        <result property="assetType" column="asset_type"/>
+        <result property="brandModel" column="brand_model"/>
+        <result property="ownerUser" column="owner_user"/>
+        <result property="assetStatus" column="asset_status"/>
+        <result property="receiveTime" column="receive_time"/>
+        <result property="returnTime" column="return_time"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+
+    <sql id="selectItAssetVo">
+        select asset_id, asset_no, asset_type, brand_model, owner_user, asset_status,
+               receive_time, return_time, create_by, create_time, update_by, update_time, remark
+        from it_asset
+    </sql>
+
+    <select id="selectItAssetList" parameterType="ItAsset" resultMap="ItAssetResult">
+        <include refid="selectItAssetVo"/>
+        <where>
+            <if test="assetNo != null and assetNo != ''">
+                and asset_no like concat('%', #{assetNo}, '%')
+            </if>
+            <if test="assetType != null and assetType != ''">
+                and asset_type = #{assetType}
+            </if>
+            <if test="assetStatus != null and assetStatus != ''">
+                and asset_status = #{assetStatus}
+            </if>
+            <if test="ownerUser != null and ownerUser != ''">
+                and owner_user = #{ownerUser}
+            </if>
+        </where>
+        order by asset_id desc
+    </select>
+
+    <select id="selectItAssetById" parameterType="Long" resultMap="ItAssetResult">
+        <include refid="selectItAssetVo"/>
+        where asset_id = #{assetId}
+    </select>
+
+    <insert id="insertItAsset" parameterType="ItAsset" useGeneratedKeys="true" keyProperty="assetId">
+        insert into it_asset
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="assetNo != null and assetNo != ''">asset_no,</if>
+            <if test="assetType != null and assetType != ''">asset_type,</if>
+            <if test="brandModel != null and brandModel != ''">brand_model,</if>
+            <if test="ownerUser != null and ownerUser != ''">owner_user,</if>
+            <if test="assetStatus != null and assetStatus != ''">asset_status,</if>
+            <if test="receiveTime != null">receive_time,</if>
+            <if test="returnTime != null">return_time,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            <if test="remark != null and remark != ''">remark,</if>
+            create_time
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="assetNo != null and assetNo != ''">#{assetNo},</if>
+            <if test="assetType != null and assetType != ''">#{assetType},</if>
+            <if test="brandModel != null and brandModel != ''">#{brandModel},</if>
+            <if test="ownerUser != null and ownerUser != ''">#{ownerUser},</if>
+            <if test="assetStatus != null and assetStatus != ''">#{assetStatus},</if>
+            <if test="receiveTime != null">#{receiveTime},</if>
+            <if test="returnTime != null">#{returnTime},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            <if test="remark != null and remark != ''">#{remark},</if>
+            sysdate()
+        </trim>
+    </insert>
+
+    <update id="updateItAsset" parameterType="ItAsset">
+        update it_asset
+        <set>
+            <if test="assetNo != null and assetNo != ''">asset_no = #{assetNo},</if>
+            <if test="assetType != null and assetType != ''">asset_type = #{assetType},</if>
+            <if test="brandModel != null and brandModel != ''">brand_model = #{brandModel},</if>
+            <if test="ownerUser != null">owner_user = #{ownerUser},</if>
+            <if test="assetStatus != null and assetStatus != ''">asset_status = #{assetStatus},</if>
+            <if test="receiveTime != null">receive_time = #{receiveTime},</if>
+            <if test="returnTime != null">return_time = #{returnTime},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            update_time = sysdate()
+        </set>
+        where asset_id = #{assetId}
+    </update>
+
+    <delete id="deleteItAssetById" parameterType="Long">
+        delete from it_asset where asset_id = #{assetId}
+    </delete>
+
+    <delete id="deleteItAssetByIds" parameterType="Long">
+        delete from it_asset where asset_id in
+        <foreach collection="array" item="assetId" open="(" separator="," close=")">
+            #{assetId}
+        </foreach>
+    </delete>
+</mapper>

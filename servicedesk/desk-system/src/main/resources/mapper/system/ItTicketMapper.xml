@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zhanhe.servicedesk.system.mapper.ItTicketMapper">
+
+    <resultMap type="ItTicket" id="ItTicketResult">
+        <id property="ticketId" column="ticket_id"/>
+        <result property="ticketNo" column="ticket_no"/>
+        <result property="applicant" column="applicant"/>
+        <result property="ticketType" column="ticket_type"/>
+        <result property="priority" column="priority"/>
+        <result property="status" column="status"/>
+        <result property="handler" column="handler"/>
+        <result property="title" column="title"/>
+        <result property="description" column="description"/>
+        <result property="completeTime" column="complete_time"/>
+        <result property="deviceInfo" column="device_info"/>
+        <result property="symptom" column="symptom"/>
+        <result property="impactScope" column="impact_scope"/>
+        <result property="triedActions" column="tried_actions"/>
+        <result property="aiSource" column="ai_source"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+
+    <sql id="selectItTicketVo">
+        select ticket_id, ticket_no, applicant, ticket_type, priority, status, handler,
+               title, description, complete_time,
+               device_info, symptom, impact_scope, tried_actions, ai_source,
+               create_by, create_time, update_by, update_time, remark
+        from it_ticket
+    </sql>
+
+    <select id="selectItTicketList" parameterType="ItTicket" resultMap="ItTicketResult">
+        <include refid="selectItTicketVo"/>
+        <where>
+            <if test="ticketNo != null and ticketNo != ''">
+                and ticket_no like concat('%', #{ticketNo}, '%')
+            </if>
+            <if test="applicant != null and applicant != ''">
+                and applicant = #{applicant}
+            </if>
+            <if test="ticketType != null and ticketType != ''">
+                and ticket_type = #{ticketType}
+            </if>
+            <if test="priority != null and priority != ''">
+                and priority = #{priority}
+            </if>
+            <if test="status != null and status != ''">
+                and status = #{status}
+            </if>
+            <if test="handler != null and handler != ''">
+                and handler = #{handler}
+            </if>
+            <if test="impactScope != null and impactScope != ''">
+                and impact_scope = #{impactScope}
+            </if>
+            <if test="aiSource != null and aiSource != ''">
+                and ai_source = #{aiSource}
+            </if>
+        </where>
+        order by ticket_id desc
+    </select>
+
+    <select id="selectItTicketById" parameterType="Long" resultMap="ItTicketResult">
+        <include refid="selectItTicketVo"/>
+        where ticket_id = #{ticketId}
+    </select>
+
+    <select id="selectOverduePendingTickets" resultMap="ItTicketResult">
+        <include refid="selectItTicketVo"/>
+        where status = 'pending'
+          and create_time &lt;= date_sub(sysdate(), interval 24 hour)
+        order by create_time asc
+    </select>
+
+    <!--
+      历史工单语料：仅取已完结且有处理说明的工单，供「历史同类工单」检索使用。
+      只输出检索所需字段，不输出申请人等敏感信息（检索结果仅 IT/管理员可见）。
+    -->
+    <select id="selectTicketsForRetrieval" resultType="map">
+        select t.ticket_id as ticketId,
+               t.ticket_no as ticketNo,
+               t.ticket_type as ticketType,
+               t.title as title,
+               t.description as description,
+               t.device_info as deviceInfo,
+               t.symptom as symptom,
+               t.impact_scope as impactScope,
+               (select r.process_note
+                  from it_ticket_record r
+                 where r.ticket_id = t.ticket_id
+                   and r.action = 'PROCESS'
+                   and r.process_note is not null
+                 order by r.record_id desc
+                 limit 1) as processNote
+        from it_ticket t
+        where t.status in ('completed', 'closed')
+        order by t.ticket_id desc
+        limit 500
+    </select>
+
+    <insert id="insertItTicket" parameterType="ItTicket" useGeneratedKeys="true" keyProperty="ticketId">
+        insert into it_ticket(ticket_no, applicant, ticket_type, priority, status, handler,
+                              title, description, complete_time,
+                              device_info, symptom, impact_scope, tried_actions, ai_source,
+                              create_by, create_time, remark)
+        values(#{ticketNo}, #{applicant}, #{ticketType}, #{priority}, #{status}, #{handler},
+               #{title}, #{description}, #{completeTime},
+               #{deviceInfo}, #{symptom}, #{impactScope}, #{triedActions}, #{aiSource},
+               #{createBy}, sysdate(), #{remark})
+    </insert>
+
+    <update id="updateItTicket" parameterType="ItTicket">
+        update it_ticket
+        <set>
+            <if test="ticketType != null and ticketType != ''">ticket_type = #{ticketType},</if>
+            <if test="priority != null and priority != ''">priority = #{priority},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="handler != null">handler = #{handler},</if>
+            <if test="title != null and title != ''">title = #{title},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="completeTime != null">complete_time = #{completeTime},</if>
+            <if test="deviceInfo != null">device_info = #{deviceInfo},</if>
+            <if test="symptom != null">symptom = #{symptom},</if>
+            <if test="impactScope != null">impact_scope = #{impactScope},</if>
+            <if test="triedActions != null">tried_actions = #{triedActions},</if>
+            <if test="aiSource != null">ai_source = #{aiSource},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            update_time = sysdate()
+        </set>
+        where ticket_id = #{ticketId}
+    </update>
+
+    <delete id="deleteItTicketByIds" parameterType="Long">
+        delete from it_ticket where ticket_id in
+        <foreach collection="array" item="ticketId" open="(" separator="," close=")">
+            #{ticketId}
+        </foreach>
+    </delete>
+</mapper>
