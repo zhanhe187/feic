@@ -19,11 +19,11 @@
 | 到期提醒 | 定时扫描生成提醒（幂等），可手工触发 | `POST /employee/basic/lifecycle/scan` |
 | 续签 / 不续签 | 续签改合同起止并重算年限；不续签只留决策，不改在职状态 | `PUT /employee/basic/{id}/renew`、`PUT /employee/basic/{id}/not-renew` |
 | 跟进记录 | 按员工查转正/续签/不续签的动作流水，含到期日前后值 | `GET /employee/basic/{id}/lifecycle/actions` |
-| 提醒邮件 | 先写 `mail_send_log` 再投 MQ，失败按 10 秒一轮重投，最多 3 次 | `MailSendTask` |
+| 提醒邮件 | 先写 `mail_send_log` 再投 MQ（消息体 `MailTaskMessage`），消费端发 SMTP；失败 `count+1` 回待发送，`MailSendTask` 每 10 秒重投，3 次置失败 | `MailDispatchListener`、`MailSendTask` |
 
 ## 技术栈
 
-Spring Boot 2.4.0 / Spring Security（会话登录 + 菜单权限）/ MyBatis 2.1.0 / MySQL 8 / Redis（菜单权限缓存）/ RabbitMQ（提醒邮件）/ Flyway（`V1__workforce.sql` 基线）/ Druid / Vue 2 + Element UI。
+Spring Boot 2.4.0 / Spring Security（会话登录 + 菜单权限）/ MyBatis 2.1.0 / MySQL 8 / Redis（菜单权限缓存）/ RabbitMQ（提醒邮件投递）/ JavaMail（SMTP 发信）/ Flyway（`V1__workforce.sql` 基线）/ Druid / Vue 2 + Element UI。
 
 ## 架构
 
@@ -31,21 +31,21 @@ Spring Boot 2.4.0 / Spring Security（会话登录 + 菜单权限）/ MyBatis 2.
 web/                     Vue 2 + Element UI，菜单由 /system/config/menu 动态注册路由
    │  HTTP  /employee/basic/**
 wf-web                   Controller、SecurityConfig、全局异常
-wf-service               EmployeeService、两个 Policy、定时任务、RabbitConfig
+wf-service               EmployeeService、两个 Policy、定时任务、RabbitConfig、mq/MailDispatchListener
 wf-mapper                Mapper 接口 + 同包 XML（不在 src/main/resources/mappers）
-wf-model                 Employee / EmployeeLifecycleReminder / EmployeeLifecycleAction / MailSendLog
+wf-model                 Employee / 生命周期两表实体 / MailSendLog / MailTaskMessage
    │
-MySQL(workforce)   Redis(menus_cache)   RabbitMQ(zhanhe.mail.exchange)
+MySQL(workforce)   Redis(menus_cache)   RabbitMQ(zhanhe.mail.exchange) → SMTP
 ```
 
 ## 关键设计
 
-- **幂等提醒**：`employee_lifecycle_reminder` 对 `(emp_id, remind_type, remind_date)` 建唯一键，插入用 `insert ignore`，重复即忽略；只有影响行数为 1 才继续发邮件、把员工 `lifecycleReminderStatus` 置 `SENT`。批任务同一天重跑不会重复打扰。
+- **幂等提醒**：`employee_lifecycle_reminder` 对 `(emp_id, remind_type, remind_date)` 建唯一键，插入用 `insert ignore`，重复即忽略；只有影响行数为 1 才继续发邮件、把员工 `lifecycleReminderStatus` 置 `SENT`。判重只靠这张唯一键（`lifecycleReminderStatus` 只做页面展示，不拦扫描），批任务同一天重跑不会重复打扰。
 - **索引与查询**：`employee` 上建 `(workState, conversionTime, departmentId)`、`(workState, endContract, departmentId)` 与 `(lifecycleReminderStatus)`。待办查询原来是「只卡上界（今天+7）」，把「今天」补成下界（`>= curdate()`）后，本地数据从 617 条降到 3 条。
 - **规则收口**：转正校验在 `EmployeeLifecyclePolicy`，续签/不续签校验在 `ContractRenewPolicy`，Controller 只负责解析参数与转错误信息，前端校验可以被绕过而 Service 不会。
-- **事务边界**：转正、续签、不续签都在 `EmployeeService` 的一个方法里先 `updateByPrimaryKeySelective`（合同字段与 `lifecycleReminderStatus` 同一条 UPDATE）再 `insertAction`；**当前代码尚未加 `@Transactional`**（仓库里只有 `HrService`、`MenuService` 用了），第二次写失败会留下部分写入，详见 `docs/workforce.md`。
+- **事务边界**：转正、续签、不续签三个方法都带 `@Transactional`，`employee` 行（合同字段与 `lifecycleReminderStatus` 同一条 UPDATE）与 `employee_lifecycle_action` 行同成同败；发信在事务之外，扫描时先落日志再投 MQ，由消费端异步发送。
 - **30 天冷静期**：合同待办与扫描候选都用 `not exists` 子查询排除 30 天内已有 `NOT_RENEW` 决策的员工，`ContractRenewPolicy.COOL_DOWN_DAYS` 与之对应。
-- **通知重试**：先落 `mail_send_log`（status=0，tryTime=now+1 分钟）再投递；`MailSendTask` 每 10 秒捞 `status=0 and tryTime < sysdate()`，重试计数为 null 时按 0 处理（修复过空指针），到 3 次直接置 status=2。
+- **通知重试**：先落 `mail_send_log`（status=0，tryTime=now+1 分钟）再投 `MailTaskMessage`；消费端 `MailDispatchListener` 发 SMTP，失败 `count+1` 并置回 0；`MailSendTask` 每 10 秒捞 `status=0 and tryTime < sysdate()` 重投，计数为 null 时按 0 处理（修复过空指针），到 3 次置 status=2。未配置 SMTP 时消费端跳过实际发信、把日志置 1，不进重试队列。
 
 ## 数据表
 
@@ -54,7 +54,7 @@ MySQL(workforce)   Redis(menus_cache)   RabbitMQ(zhanhe.mail.exchange)
 | `employee` | `workState`（试用期/在职/正式/离职）、`conversionTime`、`beginContract`、`endContract`、`contractTerm`、`lifecycleReminderStatus`（PENDING/SENT/DONE） | 原人事表，02 脚本扩展了枚举与提醒状态列 |
 | `employee_lifecycle_reminder` | `emp_id`、`remind_type`（PROBATION/CONTRACT）、`remind_status`、`remind_date` | 提醒流水，唯一键做幂等 |
 | `employee_lifecycle_action` | `emp_id`、`action_type`（REGULARIZE/RENEW/NOT_RENEW）、`before_end_contract`、`after_end_contract`、`reason`、`operator` | 跟进留痕，回答「后来怎么处理的」 |
-| `mail_send_log` | `msgId`、`empId`、`status`（0 投递中/1 成功/2 失败）、`count`、`tryTime` | 发送日志与重试依据 |
+| `mail_send_log` | `msgId`、`empId`、`status`（0 待发送/1 已处理/2 失败）、`count`、`tryTime` | 发送日志与重试依据 |
 
 ## 快速开始
 
@@ -75,7 +75,7 @@ java -jar wfserver/wf-web/target/wf-web-0.0.1-SNAPSHOT.jar
 cd web && npm install && npm run serve
 ```
 
-`wfserver/wf-web/src/main/resources/application.yml` 的数据源、RabbitMQ、Redis 都可用环境变量覆盖（`MYSQL_HOST`/`MYSQL_USER`/`MYSQL_PASSWORD`、`RABBIT_HOST`、`REDIS_HOST` 等），默认连本机。Flyway 开了 `baseline-on-migrate: true`，手工导过 `01_init.sql` 后启动只写基线记录，不会重复建表。登录后从菜单「生命周期提醒」（`/emp/lifecycle`）进入待办页。
+`wfserver/wf-web/src/main/resources/application.yml` 的数据源、RabbitMQ、Redis、SMTP 都可用环境变量覆盖（`MYSQL_HOST`/`MYSQL_USER`/`MYSQL_PASSWORD`、`RABBIT_HOST`、`REDIS_HOST`、`MAIL_HOST`/`MAIL_USER`/`MAIL_PASSWORD` 等），默认连本机；不配 SMTP 时消费端跳过实际发信只记日志，投递与重试仍可验证。Flyway 开了 `baseline-on-migrate: true`，手工导过 `01_init.sql` 后启动只写基线记录，不会重复建表。登录后从菜单「生命周期提醒」（`/emp/lifecycle`）进入待办页。
 
 ## 目录结构
 
@@ -86,13 +86,13 @@ workforce/
 └── wfserver/
     ├── wf-model/         实体、MailConstants、RespBean
     ├── wf-mapper/        Mapper 接口与同名 XML
-    ├── wf-service/       service/、task/、config/、utils/
+    ├── wf-service/       service/、task/、config/、mq/、utils/
     └── wf-web/           controller/、config/（Security）、resources/db/migration/
 ```
 
 ## 已验证的测试与脚本
 
-- `wf-service` 单测 11 个用例全部通过：`ContractRenewPolicyTest` 8 个（离职拒续签、日期倒挂、合同重叠、到期日早于今天、正常续签、不续签原因必填等），`EmployeeLifecyclePolicyTest` 3 个。命令：`mvn -f wfserver/pom.xml -pl wf-service -am test`。
+- `wf-service` 单测 11 个用例全部通过（8 + 3），补齐事务与消费端后重跑仍全过：`ContractRenewPolicyTest` 8 个（离职拒续签、日期倒挂、合同重叠、到期日早于今天、正常续签、不续签原因必填等），`EmployeeLifecyclePolicyTest` 3 个。命令：`mvn -f wfserver/pom.xml -pl wf-service -am test`。
 - `sql/03` 可重复执行（`CREATE TABLE IF NOT EXISTS`）；`sql/02` 是 `ALTER TABLE` + `CREATE INDEX`，重复执行会报「列/索引已存在」，需要在干净库上导入。02 末尾把 1–3 号员工改成 3 天后转正、4–6 号改成 5 天后合同到期，用于本地演示。
 - 扫描可用 `POST /employee/basic/lifecycle/scan` 或页面「扫描提醒」按钮触发，返回本次新建提醒条数；同一天连续调用两次，第二次返回 0（幂等）。
 - 扫描候选 SQL 在 `employee_lifecycle_action` 上做 30 天冷静期过滤，可用 `EXPLAIN` 确认走 `idx_employee_lifecycle_probation` / `idx_employee_lifecycle_contract`（组合索引的列序问题见 docs）。
