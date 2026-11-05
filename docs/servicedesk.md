@@ -135,7 +135,7 @@
 
 ## 2. 状态机
 
-`servicedesk/desk-system/src/main/java/com/zhanhe/servicedesk/system/service/TicketStateMachine.java` 定义 5 个状态和 8 条合法流转。规则写在 `allowedNextStatuses` 的静态分支里，不是数据库表，也没有独立的状态流转表。
+`servicedesk/desk-system/src/main/java/com/zhanhe/servicedesk/system/service/TicketStateMachine.java` 用一张流转表 `Map<当前状态, 允许目标状态集合>` 定义 5 个状态和 8 条合法流转，`legalTransitionCount()` 返回的边数与下表一致。规则集中在这张表里，加一条流转只改一处，校验、测试和文档都从同一份数据出发。
 
 | 当前状态 | 动作 | 目标状态 | 接口 | 副作用 |
 |---|---|---|---|---|
@@ -162,7 +162,7 @@
 | 层 | 实现 | 覆盖范围 | 边界 |
 |---|---|---|---|
 | 功能权限 | `@PreAuthorize("@ss.hasPermi('...')")`，`PermissionService` 的 bean 名是 `ss` | 所有 IT Controller 方法；管理员由 `SysPermissionService` 注入 `*:*:*` | 只判断「能不能调接口」 |
-| 数据范围 | `ItTicketServiceImpl.selectItTicketList` / `ItAssetServiceImpl.selectItAssetList` 注入 `applicant` / `owner_user` | 列表查询 | 详情、派发、处理、驳回、关闭、删除没有再校验归属 |
+| 数据范围 | 列表：`selectItTicketList` / `selectItAssetList` 注入 `applicant` / `owner_user`；单条：`assertTicketVisible` 校验 `applicant` 或 `handler` | 列表、工单详情、处理记录、状态流转 | 资产详情与工单删除仍未校验归属；越权统一按「工单不存在」返回 |
 | 状态权限 | `TicketStateMachine.assertTransition` | 所有改状态的动作 | 只校验状态，不校验操作人 |
 
 `canHandleTicket()` 的判定是 `SecurityUtils.isAdmin()` 或拥有 `it:ticket:handle` 或 `it:ticket:all`；`canManageAsset()` 是管理员或拥有 `it:asset:edit` 或 `it:asset:all`。没有处理权限的用户，查询参数里的 `applicant` 会被当前用户名覆盖，无法通过传参查看他人工单。
@@ -171,8 +171,8 @@
 
 已知缺口：
 
-- `GET /it/ticket/{ticketId}` 只校验 `it:ticket:query`，不校验工单归属；普通员工拿到 id 可以读他人工单详情。
-- `it:ticket:close` 不在 `canHandleTicket()` 中。只有关闭权限的角色，列表仍被限制为本人申请，但可以按 id 关闭他人工单。
+- `GET /it/asset/{assetId}` 只校验 `it:asset:query` 不校验归属；工单侧已由 `assertTicketVisible` 覆盖，资产侧还没有对应实现。
+- `it:ticket:close` 不在 `canHandleTicket()` 中：只有关闭权限的角色列表仍被限制为本人申请，但流转接口的归属校验会放行本人单，跨人关闭需要额外的角色配置。
 - 资产详情同样只校验 `it:asset:query`，不校验 `owner_user`。
 - 代码里作为兜底的 `it:ticket:all`、`it:asset:all` 在 `sql/` 中没有对应菜单权限，属于预留字符串。
 - 前端的 `v-hasPermi` 只隐藏按钮。
@@ -200,13 +200,13 @@
 1. **检索语料上限**：`selectTicketsForRetrieval` 固定 `limit 500`，只取 `completed/closed`；每次查询把全量语料加载进内存算 BM25，没有分页、缓存或数据库全文索引。语料超过 500 条后，旧工单不会进入召回。
 2. **规则引擎能力有限**：仅靠固定关键词表、从句切分和命中次数分类；没有同义词、型号归一或语义泛化，「笔记本开不了机」与「电脑无法启动」可能归不到一起。类型同分时固定按「账号 > 网络 > 软件 > 设备」取。
 3. **缺少采纳率埋点**：只有 `intake` 与 `intake_commit` 两类审计，没有字段级修改记录，也没有采纳率/修改率接口。`intake` 记录没有 `ticket_id`，无法把某次识别与最终工单精确关联，只能按用户和时间做粗粒度统计。
-4. **详情与动作越权**：如第 3 节所述，详情、资产详情、动作接口没有归属校验；`it:ticket:close` 用户可关闭他人工单。
+4. **资产侧越权**：工单的详情、处理记录与状态流转已统一过 `assertTicketVisible`，但资产详情与工单删除仍只校验功能权限，没有归属判断。
 5. **状态并发**：没有乐观锁或 `where status=...`，并发动作可能互相覆盖；非法流转也不写工单时间线。
 6. **超时提醒重复**：`scanOverdueTickets` 每 30 分钟对同一批 `pending > 24h` 工单重复插入 `sys_notice`，没有「已提醒」标记或去重。
 7. **提示词与服务端约束不一致**：提示词要求 60/200/120/40 字，服务端允许 120/500/500/60 码点；`type_basis` 不做证据校验。
 8. **提交不再校验证据**：确认页可改字段，直接调接口也可传 AI 字段，服务端只做长度与枚举兜底。
 9. **硬删除**：删除工单不删处理记录与审计，表间没有外键；工单号用毫秒时间戳，理论上并发会撞唯一键。
-10. **缺少处理人与驳回原因校验**：`assign` 只校验处理人非空，不校验用户是否存在；`process/reject/close` 的说明都可以为空。
+10. **处理人校验不完整**：`assign` 只校验处理人非空、不校验用户是否存在；`process/reject` 的说明已改为必填，`close` 仍可为空。
 11. **熔断与配额的范围**：熔断是单实例内存态；配额按用户名计数，不按 IP 或全局，AI 接口也没有接 `@RateLimiter`。
 12. **检索无审计**：`it_ai_log.scene` 的注释写着 `intake / similar`，实际只写 `intake` 和 `intake_commit`，检索不落审计。
 

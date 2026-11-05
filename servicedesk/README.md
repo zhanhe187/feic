@@ -59,11 +59,11 @@ MySQL 8            Redis 7            LangChain4j → OpenAI 兼容模型（可�
 
 ### 状态机集中校验
 
-5 个状态：`pending`、`processing`、`completed`、`rejected`、`closed`；8 条合法流转集中在 `TicketStateMachine.allowedNextStatuses`，所有改状态的动作先过 `assertTransition`。没有通用 `update status` 接口，避免前端传什么就存什么。非法流转抛 `IllegalStateException`，由全局异常处理器返回错误；Controller 上的 `@Log` 会把这次失败写进 `sys_oper_log`（不会写工单处理记录）。状态流转规则硬编码在静态方法里，没有单独的状态流转数据库表。
+5 个状态：`pending`、`processing`、`completed`、`rejected`、`closed`；8 条合法流转写成一张静态流转表 `Map<当前状态, 允许目标状态集合>`，所有改状态的动作先过 `assertTransition`。没有通用 `update status` 接口，避免前端传什么就存什么。非法流转抛 `IllegalStateException`，由全局异常处理器返回错误；Controller 上的 `@Log` 会把这次失败写进 `sys_oper_log`（不会写工单处理记录）。规则是代码里的常量表，不是数据库表，改一条流转只需要改这一处。
 
 ### 接口按动作拆开
 
-`PUT /it/ticket/{ticketId}/assign`、`/process`、`/reject`、`/close` 各自校验参数、写各自的处理记录；`assign` 必填处理人，`process/reject` 写 `complete_time`，`close` 只改状态。新增一条流转要同时改 `TicketStateMachine` 和对应的动作实现。
+`PUT /it/ticket/{ticketId}/assign`、`/process`、`/reject`、`/close` 各自校验参数、写各自的处理记录；`assign` 必填处理人，`process` 必须写处理说明、`reject` 必须写驳回原因，`close` 只改状态。新增一条流转要同时改 `TicketStateMachine` 和对应的动作实现。
 
 ### JWT + Redis 会话与续期
 
@@ -77,7 +77,7 @@ MySQL 8            Redis 7            LangChain4j → OpenAI 兼容模型（可�
 | 层 | 落地位置 | 作用 |
 |---|---|---|
 | 功能权限 | `@PreAuthorize("@ss.hasPermi('it:ticket:handle')")` | 这个接口能不能调；管理员拥有 `*:*:*` |
-| 数据范围 | `ItTicketServiceImpl.selectItTicketList`、`ItAssetServiceImpl.selectItAssetList` | 无处理/管理权限时，强制 `applicant` 或 `owner_user` 为当前用户 |
+| 数据范围 | 列表：`selectItTicketList`、`selectItAssetList` 强制 `applicant` / `owner_user`；单条：`assertTicketVisible` 校验 `applicant` 或 `handler` | 无处理/管理权限时，看不到也不允许操作他人工单，越权按「工单不存在」返回 |
 | 状态权限 | `TicketStateMachine.assertTransition` | 这一行能不能改到目标状态 |
 
 前端的 `v-hasPermi` 只负责隐藏按钮，不能替代服务端校验。`@DataScope` 切面目前只用于系统用户、部门、角色查询，IT 工单与资产的数据范围是在 Service 里手写条件注入的。
