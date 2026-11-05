@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.zhanhe.workforce.mapper.EmployeeLifecycleActionMapper">
+
+    <resultMap id="BaseResultMap" type="com.zhanhe.workforce.model.EmployeeLifecycleAction">
+        <id column="id" property="id" jdbcType="INTEGER"/>
+        <result column="emp_id" property="empId" jdbcType="INTEGER"/>
+        <result column="action_type" property="actionType" jdbcType="VARCHAR"/>
+        <result column="before_end_contract" property="beforeEndContract" jdbcType="DATE"/>
+        <result column="after_end_contract" property="afterEndContract" jdbcType="DATE"/>
+        <result column="reason" property="reason" jdbcType="VARCHAR"/>
+        <result column="operator" property="operator" jdbcType="VARCHAR"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, emp_id, action_type, before_end_contract, after_end_contract, reason, operator, create_time
+    </sql>
+
+    <insert id="insertAction" parameterType="com.zhanhe.workforce.model.EmployeeLifecycleAction"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into employee_lifecycle_action
+        (emp_id, action_type, before_end_contract, after_end_contract, reason, operator, create_time)
+        values
+        (#{empId}, #{actionType}, #{beforeEndContract,jdbcType=DATE}, #{afterEndContract,jdbcType=DATE},
+         #{reason}, #{operator}, #{createTime})
+    </insert>
+
+    <select id="selectByEmpId" resultMap="BaseResultMap" parameterType="java.lang.Integer">
+        select
+        <include refid="Base_Column_List"/>
+        from employee_lifecycle_action
+        where emp_id = #{empId}
+        order by id desc
+    </select>
+
+    <select id="selectLatestByType" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from employee_lifecycle_action
+        where emp_id = #{empId} and action_type = #{actionType}
+        order by id desc
+        limit 1
+    </select>
+</mapper>

@@ -1,0 +1,48 @@
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    # 连接信息可用环境变量覆盖，缺省值与 deploy/.env.example 一致，本地直接 java -jar 也能起
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB_WORKFORCE:workforce}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+  rabbitmq:
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASSWORD:guest}
+    host: ${RABBIT_HOST:127.0.0.1}
+    port: ${RABBIT_PORT:5672}
+    publisher-confirms: true
+    publisher-returns: true
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    database: ${REDIS_DB:0}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+  cache:
+    cache-names: menus_cache
+  flyway:
+    # 允许「先手动导入 workforce.sql 再启动」：库非空时只写入基线记录，不再重复执行 V1__workforce.sql
+    baseline-on-migrate: true
+    baseline-version: 1
+server:
+  port: 8081
+  compression:
+    enabled: true
+spring.mail:
+  host: ${MAIL_HOST:}
+  port: ${MAIL_PORT:25}
+  username: ${MAIL_USER:}
+  password: ${MAIL_PASSWORD:}
+  properties:
+    mail.smtp.auth: ${MAIL_AUTH:false}
+    mail.smtp.starttls.enable: ${MAIL_STARTTLS:false}
+
+workforce:
+  mail:
+    # 打开后消费端才会真正调用 SMTP，需要同时配置上面的 spring.mail.*
+    enabled: ${MAIL_ENABLED:false}
+    # 消费端发信时使用的发件人
+    from: ${MAIL_FROM:no-reply@workforce.local}
+
+fastdfs:
+  nginx:
+    host: http://192.168.91.128/
