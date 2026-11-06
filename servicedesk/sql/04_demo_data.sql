@@ -34,7 +34,12 @@ VALUES
  '新同事的企业邮箱账号没开通',
  '上周入职的同事登录邮箱提示账号不存在，需要开通。',
  DATE_SUB(NOW(), INTERVAL 2 DAY), 'admin', DATE_SUB(NOW(), INTERVAL 3 DAY), 'admin', DATE_SUB(NOW(), INTERVAL 2 DAY),
- '企业邮箱', '登录提示账号不存在', 'single', '确认过账号拼写', NULL);
+ '企业邮箱', '登录提示账号不存在', 'single', '确认过账号拼写', NULL),('IT-DEMO-0005', 'user', 'hardware', 'medium', 'closed', 'admin',
+ '打印机显示脱机，重启打印服务后恢复',
+ '打印机面板显示脱机，打印队列里任务一直挂着，重启 Print Spooler 后恢复正常。',
+ DATE_SUB(NOW(), INTERVAL 5 DAY), 'user', DATE_SUB(NOW(), INTERVAL 6 DAY), 'admin', DATE_SUB(NOW(), INTERVAL 5 DAY),
+ '二楼打印机', '显示脱机，队列任务卡住', 'single', '重启打印服务', 'rule');
+
 
 INSERT INTO it_ticket_record (ticket_id, processor, action, process_note, process_result, process_time, create_by, create_time)
 SELECT ticket_id, 'user', 'CREATE', '员工提交工单', 'pending', create_time, 'user', create_time
@@ -51,3 +56,11 @@ FROM it_ticket WHERE ticket_no = 'IT-DEMO-0002';
 INSERT INTO it_ticket_record (ticket_id, processor, action, process_note, process_result, process_time, create_by, create_time)
 SELECT ticket_id, 'admin', 'REJECT', '该同事不走企业邮箱，改用共享邮箱，工单关闭', 'rejected', update_time, 'admin', update_time
 FROM it_ticket WHERE ticket_no = 'IT-DEMO-0004';
+
+INSERT INTO it_ticket_record (ticket_id, processor, action, process_note, process_result, process_time, create_by, create_time)
+SELECT ticket_id, 'admin', 'PROCESS', '重启 Print Spooler 后队列清空，已恢复正常', 'completed', update_time, 'admin', update_time
+FROM it_ticket WHERE ticket_no = 'IT-DEMO-0005';
+
+INSERT INTO it_ticket_record (ticket_id, processor, action, process_note, process_result, process_time, create_by, create_time)
+SELECT ticket_id, 'admin', 'CLOSE', '员工确认可正常打印，归档', 'closed', DATE_ADD(update_time, INTERVAL 1 HOUR), 'admin', DATE_ADD(update_time, INTERVAL 1 HOUR)
+FROM it_ticket WHERE ticket_no = 'IT-DEMO-0005';
