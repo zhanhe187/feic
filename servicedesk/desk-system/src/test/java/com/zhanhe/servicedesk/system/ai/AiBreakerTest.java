@@ -15,7 +15,7 @@ class AiBreakerTest
         AiProperties properties = new AiProperties();
         properties.setBreakerThreshold(threshold);
         properties.setBreakerSeconds(seconds);
-        return new AiBreaker(properties);
+        return new AiBreaker(new AiSettings(properties));
     }
 
     @Test

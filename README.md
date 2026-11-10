@@ -10,7 +10,7 @@
 | 目录 | [`workforce/`](workforce/) | [`servicedesk/`](servicedesk/) |
 | 面向 | HR | 企业内部 IT 运维 |
 | 解决什么 | 谁 7 天内要转正、谁的合同要到期，不靠翻 Excel 盯 | 员工报故障到 IT 处理关闭，描述口语化、无法筛选与派单 |
-| 关键机制 | 唯一索引幂等、组合索引、规则收口、事务边界、30 天冷静期、邮件重试 | 表驱动状态机、按动作拆接口、功能与数据双层权限、AI 分诊与降级、BM25 检索 |
+| 关键机制 | 唯一索引幂等、组合索引、规则收口、事务边界、30 天冷静期、邮件重试 | 表驱动状态机、按动作拆接口、功能与数据双层权限、AI 分诊与降级、AI 设置与站内通知、BM25 检索 |
 | 技术栈 | Spring Boot 2.4 · MyBatis · Flyway · MySQL · Redis · RabbitMQ | Spring Boot 4 · MyBatis · PageHelper · MySQL · Redis · Quartz · LangChain4j |
 | 端口 | 8081（后端） / 8084（前端） | 8080（后端） / 80（前端） |
 | 详细文档 | [README](workforce/README.md) · [设计说明](docs/workforce.md) | [README](servicedesk/README.md) · [设计说明](docs/servicedesk.md) |

@@ -236,3 +236,15 @@
 | 额度 | 把 `AI_DAILY_LIMIT` 设为 1，连续调两次 | 第二次不调模型，`degraded=true`，notice 为额度用尽 |
 
 快速观察：响应 `data.source`、`data.degraded`、`data.notice`、`data.rejected`、`data.costMs`；数据库 `it_ai_log` 的 `provider/model/degraded/cost_ms`；Redis 键 `ai:quota:{username}:{yyyyMMdd}` 的 `GET` 与 `TTL`（首次计数 25 小时）；工单详情里的处理记录与 `sys_oper_log`。要缩短熔断测试时间，可临时设 `AI_BREAKER_SECONDS=5`，避免等 300 秒。
+
+## 7. AI 配置与通知
+
+AI 参数放在独立表 `it_ai_config`（键值形式），不再占用 `sys_config`。配置入口只有「IT 服务 → AI 设置」页面：
+总开关、提供方、接口地址、API Key、模型名、超时、每日配额、熔断阈值与时长。
+
+- **即时生效**：`AiSettings` 每次调用读一次表并生成快照；`LangChain4jClient` 按「地址 + Key + 模型 + 超时」的指纹判断是否重建客户端，所以改完保存即可，不需要重启。
+- **连接自检**：`POST /it/ai/config/test` 用当前配置发一次最小请求，返回成功/失败、耗时与服务商原始错误，便于判断是 Key 问题还是网络问题。
+- **Key 保护**：接口只回显 `******`，提交仍是掩码时视为不修改；同时回传 key 长度，方便确认是否真的写进去了。
+
+通知放在 `it_message`，按人投递，共四类：新工单（高优先级标题带前缀）、派单、处理结果、AI 降级告警。
+AI 告警按「场景 + 日期」在 Redis 去重，同一场景每天只推一条；通知写入失败只记日志，不影响业务主流程。

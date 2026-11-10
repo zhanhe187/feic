@@ -25,12 +25,12 @@ public class AiQuota
 
     private final StringRedisTemplate redisTemplate;
 
-    private final AiProperties properties;
+    private final AiSettings settings;
 
-    public AiQuota(StringRedisTemplate redisTemplate, AiProperties properties)
+    public AiQuota(StringRedisTemplate redisTemplate, AiSettings settings)
     {
         this.redisTemplate = redisTemplate;
-        this.properties = properties;
+        this.settings = settings;
     }
 
     /**
@@ -38,7 +38,7 @@ public class AiQuota
      */
     public boolean tryAcquire(String userName)
     {
-        int limit = properties.getDailyLimit();
+        int limit = settings.snapshot().getDailyLimit();
         if (limit <= 0)
         {
             return true;
@@ -63,7 +63,7 @@ public class AiQuota
 
     public int remaining(String userName)
     {
-        int limit = properties.getDailyLimit();
+        int limit = settings.snapshot().getDailyLimit();
         if (limit <= 0)
         {
             return -1;

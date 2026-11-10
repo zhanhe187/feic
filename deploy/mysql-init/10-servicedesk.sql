@@ -9,3 +9,5 @@ SOURCE /init/servicedesk/02_it_ticket.sql;
 SOURCE /init/servicedesk/03_ai_intake.sql;
 SOURCE /init/servicedesk/05_quartz.sql;
 SOURCE /init/servicedesk/04_demo_data.sql;
+SOURCE /init/servicedesk/07_ai_message.sql;
+SOURCE /init/servicedesk/08_ai_config_table.sql;

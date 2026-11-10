@@ -28,25 +28,28 @@ public class LangChain4jClient implements AiLlmClient
 {
     private static final Logger log = LoggerFactory.getLogger(LangChain4jClient.class);
 
-    private final AiProperties properties;
+    private final AiSettings settings;
 
     private volatile OpenAiChatModel model;
 
-    public LangChain4jClient(AiProperties properties)
+    private volatile String modelFingerprint;
+
+    public LangChain4jClient(AiSettings settings)
     {
-        this.properties = properties;
+        this.settings = settings;
     }
 
     @Override
     public String chat(String systemPrompt, String userPayload)
     {
-        if (!properties.useLlm())
+        AiSettings.Snapshot snapshot = settings.snapshot();
+        if (!snapshot.useLlm())
         {
             throw new AiUnavailableException("LLM 未启用或缺少 API Key");
         }
         try
         {
-            ChatResponse response = model().chat(
+            ChatResponse response = model(snapshot).chat(
                     SystemMessage.from(systemPrompt),
                     UserMessage.from(userPayload));
             String text = response == null || response.aiMessage() == null ? null : response.aiMessage().text();
@@ -71,31 +74,33 @@ public class LangChain4jClient implements AiLlmClient
     @Override
     public String modelName()
     {
-        return properties.getModel();
+        return settings.snapshot().getModel();
     }
 
-    /** 懒加载：没配 Key 时根本不会构造客户端 */
-    private OpenAiChatModel model()
+    /** 懒加载 + 配置变化自动重建：后台改完 Key/地址/模型，无需重启 */
+    private OpenAiChatModel model(AiSettings.Snapshot snapshot)
     {
+        String fingerprint = snapshot.fingerprint();
         OpenAiChatModel current = model;
-        if (current != null)
+        if (current != null && fingerprint.equals(modelFingerprint))
         {
             return current;
         }
         synchronized (this)
         {
-            if (model == null)
+            if (model == null || !fingerprint.equals(modelFingerprint))
             {
                 model = OpenAiChatModel.builder()
-                        .baseUrl(trimTrailingSlash(properties.getBaseUrl()))
-                        .apiKey(properties.getApiKey())
-                        .modelName(properties.getModel())
-                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .baseUrl(trimTrailingSlash(snapshot.getBaseUrl()))
+                        .apiKey(snapshot.getApiKey())
+                        .modelName(snapshot.getModel())
+                        .timeout(Duration.ofSeconds(snapshot.getTimeoutSeconds()))
                         .maxRetries(0)
                         .responseFormat("json_object")
                         .logRequests(false)
                         .logResponses(false)
                         .build();
+                modelFingerprint = fingerprint;
             }
             return model;
         }

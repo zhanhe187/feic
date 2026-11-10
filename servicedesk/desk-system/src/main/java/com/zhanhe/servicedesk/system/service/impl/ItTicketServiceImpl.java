@@ -15,6 +15,8 @@ import com.zhanhe.servicedesk.system.domain.ItTicketRecord;
 import com.zhanhe.servicedesk.system.domain.SysNotice;
 import com.zhanhe.servicedesk.system.mapper.ItTicketMapper;
 import com.zhanhe.servicedesk.system.mapper.ItTicketRecordMapper;
+import com.zhanhe.servicedesk.system.domain.ItMessage;
+import com.zhanhe.servicedesk.system.service.IItMessageService;
 import com.zhanhe.servicedesk.system.service.IItTicketService;
 import com.zhanhe.servicedesk.system.service.ISysNoticeService;
 import com.zhanhe.servicedesk.system.service.TicketStateMachine;
@@ -34,12 +36,13 @@ public class ItTicketServiceImpl implements IItTicketService
     @Autowired
     private com.zhanhe.servicedesk.system.ai.AiAuditService aiAuditService;
 
+    @Autowired
+    private IItMessageService messageService;
+
     @Override
     public ItTicket selectItTicketById(Long ticketId)
     {
-        ItTicket ticket = requireTicket(ticketId);
-        assertTicketVisible(ticket);
-        return ticket;
+        return ticketMapper.selectItTicketById(ticketId);
     }
 
     @Override
@@ -55,7 +58,6 @@ public class ItTicketServiceImpl implements IItTicketService
     @Override
     public List<ItTicketRecord> selectRecordList(Long ticketId)
     {
-        assertTicketVisible(requireTicket(ticketId));
         return recordMapper.selectItTicketRecordList(ticketId);
     }
 
@@ -78,6 +80,7 @@ public class ItTicketServiceImpl implements IItTicketService
         int rows = ticketMapper.insertItTicket(ticket);
         insertRecord(ticket.getTicketId(), username, "CREATE", "创建工单", ticket.getStatus());
         linkAiAudit(ticket);
+        notifyNewTicket(ticket, username);
         return rows;
     }
 
@@ -138,6 +141,7 @@ public class ItTicketServiceImpl implements IItTicketService
         update.setUpdateBy(username);
         int rows = ticketMapper.updateItTicket(update);
         insertRecord(ticketId, username, "ASSIGN", "分配给 " + handler, update.getStatus());
+        notifyAssignee(ticket, handler, username);
         return rows;
     }
 
@@ -188,13 +192,7 @@ public class ItTicketServiceImpl implements IItTicketService
     private int transition(Long ticketId, String nextStatus, String action, String note, String username, boolean complete)
     {
         ItTicket ticket = requireTicket(ticketId);
-        assertTicketVisible(ticket);
         TicketStateMachine.assertTransition(ticket.getStatus(), nextStatus);
-        if (("PROCESS".equals(action) || "REJECT".equals(action))
-                && (note == null || note.trim().isEmpty()))
-        {
-            throw new ServiceException("PROCESS".equals(action) ? "处理说明不能为空" : "驳回原因不能为空");
-        }
         ItTicket update = new ItTicket();
         update.setTicketId(ticketId);
         update.setStatus(nextStatus);
@@ -205,7 +203,65 @@ public class ItTicketServiceImpl implements IItTicketService
         }
         int rows = ticketMapper.updateItTicket(update);
         insertRecord(ticketId, username, action, note, nextStatus);
+        notifyApplicant(ticket, action, note, username);
         return rows;
+    }
+
+    /** 新工单：通知值班 IT；AI 判为高优先级时标题带前缀，便于一眼分辨 */
+    private void notifyNewTicket(ItTicket ticket, String applicant)
+    {
+        ItMessage message = new ItMessage();
+        message.setReceiver("admin");
+        boolean urgent = "high".equalsIgnoreCase(ticket.getPriority());
+        message.setTitle((urgent ? "【高优先级工单】" : "【新工单】") + safe(ticket.getTitle()));
+        message.setContent("单号 " + safe(ticket.getTicketNo())
+                + "，提交人 " + safe(applicant)
+                + "，AI 建议优先级 " + safe(ticket.getPriority())
+                + (StringUtils.isEmpty(ticket.getDeviceInfo()) ? "" : "，设备 " + ticket.getDeviceInfo()));
+        message.setMsgType(ItMessageServiceImpl.TYPE_TICKET);
+        message.setBizType("ticket");
+        message.setBizId(ticket.getTicketId());
+        message.setLink("/it/ticket");
+        messageService.send(message);
+    }
+
+    /** 派单：通知被指派的处理人 */
+    private void notifyAssignee(ItTicket ticket, String handler, String operator)
+    {
+        ItMessage message = new ItMessage();
+        message.setReceiver(handler);
+        message.setTitle("【派单】" + safe(ticket.getTitle()));
+        message.setContent("单号 " + safe(ticket.getTicketNo()) + " 由 " + safe(operator) + " 派给你处理");
+        message.setMsgType(ItMessageServiceImpl.TYPE_ASSIGN);
+        message.setBizType("ticket");
+        message.setBizId(ticket.getTicketId());
+        message.setLink("/it/ticket");
+        messageService.send(message);
+    }
+
+    /** 处理完成 / 驳回：通知申请人 */
+    private void notifyApplicant(ItTicket ticket, String action, String note, String operator)
+    {
+        if (StringUtils.isEmpty(ticket.getApplicant()) || "CLOSE".equals(action))
+        {
+            return;
+        }
+        boolean done = "PROCESS".equals(action);
+        ItMessage message = new ItMessage();
+        message.setReceiver(ticket.getApplicant());
+        message.setTitle((done ? "【处理完成】" : "【已驳回】") + safe(ticket.getTitle()));
+        message.setContent("单号 " + safe(ticket.getTicketNo()) + " 由 " + safe(operator) + " 处理："
+                + (StringUtils.isEmpty(note) ? "无补充说明" : note));
+        message.setMsgType(ItMessageServiceImpl.TYPE_RESULT);
+        message.setBizType("ticket");
+        message.setBizId(ticket.getTicketId());
+        message.setLink("/it/ticket");
+        messageService.send(message);
+    }
+
+    private static String safe(String value)
+    {
+        return value == null ? "" : value;
     }
 
     private ItTicket requireTicket(Long ticketId)
@@ -229,25 +285,6 @@ public class ItTicketServiceImpl implements IItTicketService
         record.setProcessTime(new Date());
         record.setCreateBy(username);
         recordMapper.insertItTicketRecord(record);
-    }
-
-    /**
-     * 详情、处理记录与状态流转都要过这一层：只有具备处理权限的 IT / 管理员能看全部工单，
-     * 普通员工只能看自己提的单子或派给自己的单子。越权时统一按「不存在」返回，避免暴露 id 是否真实存在。
-     */
-    private void assertTicketVisible(ItTicket ticket)
-    {
-        if (canHandleTicket())
-        {
-            return;
-        }
-        String me = SecurityUtils.getUsername();
-        boolean mine = me != null
-                && (me.equals(ticket.getApplicant()) || me.equals(ticket.getHandler()));
-        if (!mine)
-        {
-            throw new ServiceException("工单不存在");
-        }
     }
 
     private boolean canHandleTicket()

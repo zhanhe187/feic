@@ -18,11 +18,11 @@ public class AiBreaker
 
     private volatile long openUntilMillis = 0L;
 
-    private final AiProperties properties;
+    private final AiSettings settings;
 
-    public AiBreaker(AiProperties properties)
+    public AiBreaker(AiSettings settings)
     {
-        this.properties = properties;
+        this.settings = settings;
     }
 
     public boolean isOpen()
@@ -39,9 +39,10 @@ public class AiBreaker
     public void recordFailure()
     {
         int failures = consecutiveFailures.incrementAndGet();
-        if (failures >= Math.max(1, properties.getBreakerThreshold()))
+        AiSettings.Snapshot snapshot = settings.snapshot();
+        if (failures >= snapshot.getBreakerThreshold())
         {
-            openUntilMillis = System.currentTimeMillis() + Math.max(1, properties.getBreakerSeconds()) * 1000L;
+            openUntilMillis = System.currentTimeMillis() + snapshot.getBreakerSeconds() * 1000L;
             consecutiveFailures.set(0);
         }
     }
