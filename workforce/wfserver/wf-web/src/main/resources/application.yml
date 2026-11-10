@@ -23,6 +23,11 @@ spring:
     # 允许「先手动导入 workforce.sql 再启动」：库非空时只写入基线记录，不再重复执行 V1__workforce.sql
     baseline-on-migrate: true
     baseline-version: 1
+vhr:
+  upload:
+    # 头像等小文件的落盘目录，相对路径按启动目录解析
+    dir: ./uploads
+
 server:
   port: 8081
   compression:
@@ -43,6 +48,3 @@ workforce:
     # 消费端发信时使用的发件人
     from: ${MAIL_FROM:no-reply@workforce.local}
 
-fastdfs:
-  nginx:
-    host: http://192.168.91.128/

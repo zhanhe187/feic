@@ -1,27 +1,30 @@
 package com.zhanhe.workforce.controller;
 
-import com.zhanhe.workforce.config.FastDFSUtils;
+import com.zhanhe.workforce.config.LocalFileStorage;
 import com.zhanhe.workforce.model.Hr;
 import com.zhanhe.workforce.model.RespBean;
 import com.zhanhe.workforce.service.HrService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Map;
 
+/**
+ * @时间 2020-03-01 13:07
+ */
 @RestController
 public class HrInfoController {
 
     @Autowired
     HrService hrService;
 
-    @Value("${fastdfs.nginx.host}")
-    String nginxHost;
+    @Autowired
+    LocalFileStorage fileStorage;
 
     @GetMapping("/hr/info")
     public Hr getCurrentHr(Authentication authentication) {
@@ -49,9 +52,13 @@ public class HrInfoController {
     }
 
     @PostMapping("/hr/userface")
-    public RespBean updateHrUserface(MultipartFile file, Integer id,Authentication authentication) {
-        String fileId = FastDFSUtils.upload(file);
-        String url = nginxHost + fileId;
+    public RespBean updateHrUserface(MultipartFile file, Integer id, Authentication authentication) {
+        String url;
+        try {
+            url = fileStorage.save(file);
+        } catch (IOException e) {
+            return RespBean.error(e.getMessage());
+        }
         if (hrService.updateUserface(url, id) == 1) {
             Hr hr = (Hr) authentication.getPrincipal();
             hr.setUserface(url);
